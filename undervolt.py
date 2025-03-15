@@ -71,7 +71,7 @@ def write_msr(val, addr):
     Writes to all msr node on all CPUs available.
     """
     assert_root()
-    
+
     for i in valid_cpus():
         c = '/dev/cpu/%d/msr' % i
         if not os.path.exists(c):
@@ -360,6 +360,42 @@ def assert_root():
     if os.geteuid() != 0:
         exit("You need to have root privileges to run this script with these options.\nRerun with 'sudo'.")
 
+def read_bd_prochot_status():
+    """
+    Read the current status of BD PROCHOT (bit[0] of MSR 0x1FC).
+    Returns True if BD PROCHOT is enabled, False if disabled.
+    """
+    msr_addr = 0x1FC
+    current_value = read_msr(msr_addr)
+    return bool(current_value & 1)
+
+def set_bd_prochot(status):
+    """
+    Enable or disable BD PROCHOT (Bi-Directional Processor Hot) by setting or clearing bit[0] of MSR 0x1FC.
+    BD PROCHOT is a thermal throttling mechanism that allows external systems (e.g., the motherboard or GPU)
+    to signal the CPU to throttle performance when temperatures exceed safe limits.
+
+    Disabling BD PROCHOT can prevent external systems from throttling the CPU, which may improve performance
+    but can also lead to overheating if not carefully monitored. Use with caution.
+
+    :param status: True to enable BD PROCHOT, False to disable it.
+    """
+    msr_addr = 0x1FC  # MSR address for BD PROCHOT
+    current_value = read_msr(msr_addr)
+
+    if status:
+        # Enable BD PROCHOT by setting bit[0]
+        new_value = current_value | 1
+        logging.info("Enabling BD PROCHOT: Allowing external systems to throttle the CPU for thermal safety.")
+    else:
+        # Disable BD PROCHOT by clearing bit[0]
+        new_value = current_value & ~1
+        logging.warning("Disabling BD PROCHOT: Preventing external systems from throttling the CPU. "
+                       "This may improve performance but can lead to overheating if not monitored carefully.")
+
+    write_msr(new_value, msr_addr)
+    logging.info(f"BD PROCHOT is now {'enabled' if status else 'disabled'} (MSR 0x1FC).")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--version', action='version', version='%(prog)s {version}'.format(version=__version__))
@@ -379,6 +415,11 @@ def main():
     parser.add_argument('-p2', '--power-limit-short', nargs=2, help="P2 Power Limit (W) and Time Window (s)", metavar=('POWER_LIMIT', 'TIME_WINDOW'))
     parser.add_argument('--lock-power-limit', action='store_true',
                         help="Locks the set power limit. Once they are locked, they can not be modified until next RESET (e.g., Reboot).")
+    parser.add_argument('--bd-prochot', choices=['enable', 'disable'],
+                        help="Enable or disable BD PROCHOT (Bi-Directional Processor Hot). "
+                             "BD PROCHOT allows external systems (e.g., motherboard or GPU) to throttle the CPU for thermal safety. "
+                             "Disabling it may improve performance but can lead to overheating if not monitored carefully. "
+                             "Use with caution.")
 
     for plane in PLANES:
         parser.add_argument('--{}'.format(plane), type=int, help="offset (mV)")
@@ -391,7 +432,7 @@ def main():
     args = parser.parse_args()
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    
+
     msr = ADDRESSES
 
     if not glob('/dev/cpu/*/msr'):
@@ -430,7 +471,7 @@ def main():
     if args.lock_power_limit:
         power_limit.locked = True
     if power_limit.short_term_enabled is not None or power_limit.long_term_enabled is not None:
-        set_power_limit(power_limit, msr)    
+        set_power_limit(power_limit, msr)
 
     throttlestop = getattr(args, 'throttlestop')
     if throttlestop is not None:
@@ -446,6 +487,9 @@ def main():
                 offset = unconvert_offset(hex_value)
                 command += ' --{plane} {offset}'.format(plane=plane, offset=offset)
         print(command)
+
+    if args.bd_prochot:
+        set_bd_prochot(args.bd_prochot == 'enable')
 
     if args.read:
         temp = read_temperature(msr)
@@ -470,7 +514,10 @@ def main():
         with open("/sys/devices/system/cpu/intel_pstate/no_turbo","r") as file:
             turboDisable = int(file.readline())
             print('turbo: {}'.format("disable" if turboDisable == 1 else "enable"))
-    
+
+        bd_prochot_status = read_bd_prochot_status()
+        print('BD PROCHOT: {}'.format("enabled" if bd_prochot_status else "disabled"))
+
     turbo = getattr(args, 'turbo')
     if turbo is not None:
         intelTurboState = int(turbo)
@@ -478,7 +525,7 @@ def main():
             print("New Intel Turbo State ENABLED")
         else:
             print("New Intel Turbo State DISABLED")
-        
+
         with open("/sys/devices/system/cpu/intel_pstate/no_turbo","w+") as file:
             file.write(str(intelTurboState))
 

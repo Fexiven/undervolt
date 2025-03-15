@@ -106,6 +106,9 @@ Usage
                             P2 Power Limit (W) and Time Window (s)
       --lock-power-limit    Locks the set power limit. Once they are locked, they
                             can not be modified until next RESET (e.g., Reboot).
+      --bd-prochot {enable,disable}
+                            Enable or disable BD PROCHOT (Bi-Directional Processor Hot). BD PROCHOT allows external systems (e.g., motherboard or GPU) to throttle the CPU for thermal safety. Disabling it may
+                            improve performance but can lead to overheating if not monitored carefully. Use with caution.
       --core CORE           offset (mV)
       --gpu GPU             offset (mV)
       --cache CACHE         offset (mV)
